@@ -78,6 +78,9 @@ def _extract_pdf(path: Path, tesseract_cmd: str | None) -> list[Section]:
                         renderer = _dependency("pypdfium2").PdfDocument(str(path))
                     render_page = renderer[index - 1]
                     try:
+                        width, height = render_page.get_size()
+                        if (width * 2) * (height * 2) > 50_000_000:
+                            raise ExtractionError(f"PDF page {index} exceeds the 50 megapixel OCR limit")
                         image = render_page.render(scale=2).to_pil()
                         out.extend(_ocr(image, f"page {index}", tesseract_cmd))
                     finally:
@@ -128,12 +131,19 @@ def _extract_docx(path: Path) -> list[Section]:
             if paragraph.style and paragraph.style.name.lower().startswith("heading"):
                 heading = paragraph.text.strip()
             location = f"paragraph {i}" + (f" · {heading}" if heading else "")
-            section = _nonempty(paragraph.text, location, "text")
+            content = paragraph.text
+            if heading and content.strip() and content.strip() != heading:
+                content = heading + "\n" + content
+            section = _nonempty(content, location, "text")
             if section:
                 sections.append(section)
         for ti, table in enumerate(doc.tables, 1):
+            header = "\t".join(cell.text for cell in table.rows[0].cells) if table.rows else ""
             for ri, row in enumerate(table.rows, 1):
-                section = _nonempty("\t".join(cell.text for cell in row.cells), f"table {ti}, row {ri}", "text")
+                content = "\t".join(cell.text for cell in row.cells)
+                if ri > 1 and header:
+                    content = header + "\n" + content
+                section = _nonempty(content, f"table {ti}, row {ri}", "text")
                 if section:
                     sections.append(section)
         return sections
@@ -243,7 +253,14 @@ def _extract_image(path: Path, tesseract_cmd: str | None) -> list[Section]:
         Image = _dependency("PIL.Image", "Pillow").open(path)
         Image.verify()
         with _dependency("PIL.Image", "Pillow").open(path) as image:
-            return _ocr(image, "image", tesseract_cmd)
+            frames = getattr(image, "n_frames", 1)
+            if frames > 2000:
+                raise ExtractionError(f"Image '{path.name}' exceeds the 2000-page limit")
+            sections = []
+            for frame in range(frames):
+                image.seek(frame)
+                sections.extend(_ocr(image, f"page {frame + 1}", tesseract_cmd))
+            return sections
     except ExtractionError:
         raise
     except Exception as exc:

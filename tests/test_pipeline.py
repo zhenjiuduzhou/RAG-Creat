@@ -91,6 +91,27 @@ def test_cancel_preserves_current_index(tmp_path: Path):
     assert active_index(store.root(project["id"])) == before
 
 
+def test_removing_last_file_commits_empty_index_and_clears_cached_text(tmp_path: Path):
+    store = ProjectStore(tmp_path / "home")
+    project = store.create_project("待清空")
+    model = tmp_path / "model"
+    model.mkdir()
+    (model / "dummy").write_text("model", encoding="utf-8")
+    source = tmp_path / "private.txt"
+    source.write_text("需要清除的企业正文", encoding="utf-8")
+    item = store.add_files(project["id"], [str(source)])[0]
+    embedder = FakeEmbedder()
+    build_project(store, project["id"], embedder, model_dir=model)
+    store.remove_file(project["id"], item["id"])
+    build_project(store, project["id"], embedder, model_dir=model)
+    root = store.root(project["id"])
+    index = SearchIndex(active_index(root), embedder)
+    assert index.chunks == []
+    assert index.search("企业正文") == []
+    assert list((root / "cache").iterdir()) == []
+    assert len(list((root / "versions").iterdir())) == 1
+
+
 def test_mid_build_cancel_preserves_previous_version(tmp_path: Path):
     store = ProjectStore(tmp_path / "home")
     project = store.create_project("客户 C")
@@ -118,3 +139,35 @@ def test_mid_build_cancel_preserves_previous_version(tmp_path: Path):
     assert active_index(store.root(project["id"])) == before
     with pytest.raises(ValueError, match="重新构建"):
         export_project(store, project["id"], tmp_path / "export", "developer", model)
+
+
+def test_inventory_change_during_build_keeps_new_file_and_old_index(tmp_path: Path):
+    store = ProjectStore(tmp_path / "home")
+    project = store.create_project("并发修改")
+    model = tmp_path / "model"
+    model.mkdir()
+    (model / "dummy").write_text("model", encoding="utf-8")
+    source = tmp_path / "old.txt"
+    source.write_text("旧资料", encoding="utf-8")
+    store.add_files(project["id"], [str(source)])
+    embedder = FakeEmbedder()
+    build_project(store, project["id"], embedder, model_dir=model)
+    previous = active_index(store.root(project["id"]))
+    newer = tmp_path / "new.txt"
+    newer.write_text("后来导入的资料", encoding="utf-8")
+    another = tmp_path / "another.txt"
+    another.write_text("正在构建的资料", encoding="utf-8")
+    store.add_files(project["id"], [str(another)])
+    changed = False
+
+    def progress(_percent, message):
+        nonlocal changed
+        if not changed and "another.txt" in message:
+            store.add_files(project["id"], [str(newer)])
+            changed = True
+
+    with pytest.raises(BuildCancelled, match="资料清单已变更"):
+        build_project(store, project["id"], embedder, model_dir=model, progress=progress)
+    assert active_index(store.root(project["id"])) == previous
+    assert "new.txt" in [row["name"] for row in store.get(project["id"])["files"]]
+    assert store.get(project["id"])["dirty"]

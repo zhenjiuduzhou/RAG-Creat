@@ -41,4 +41,9 @@ def test_search_and_dify_protocol(tmp_path: Path, monkeypatch):
     assert isinstance(records[0]["metadata"], dict)
     body["knowledge_id"] = "wrong"
     assert client.post("/retrieval", json=body, headers=headers).status_code == 404
+    body["knowledge_id"] = project["id"]
+    body["metadata_condition"] = {"conditions": [{"name": "file_id", "comparison_operator": "is", "value": "other"}]}
+    assert client.post("/retrieval", json=body, headers=headers).status_code == 422
     assert client.post("/search", content="x" * 70000, headers=headers).status_code == 413
+    assert client.post("/search", content=(b"x" * 10000 for _ in range(8)), headers=headers).status_code == 413
+    assert client.post("/search", content="x" * 70000).status_code == 401

@@ -73,6 +73,25 @@ def test_docx_paragraph_locations(tmp_path: Path) -> None:
     assert [section.location for section in result] == ["paragraph 1", "paragraph 3"]
 
 
+def test_docx_heading_and_table_headers_stay_with_answers(tmp_path: Path) -> None:
+    from docx import Document
+
+    path = tmp_path / "policy.docx"
+    document = Document()
+    document.add_heading("产品 A 质保期限", level=1)
+    document.add_paragraph("两年")
+    table = document.add_table(rows=2, cols=2)
+    table.cell(0, 0).text = "产品"
+    table.cell(0, 1).text = "金额"
+    table.cell(1, 0).text = "A"
+    table.cell(1, 1).text = "100 元"
+    document.save(path)
+
+    result = extract_file(path)
+    assert "产品 A 质保期限\n两年" in [section.text for section in result]
+    assert "产品\t金额\nA\t100 元" in [section.text for section in result]
+
+
 @pytest.mark.skipif(sys.platform != "win32" or importlib.util.find_spec("rapidocr") is None,
                     reason="Windows OCR dependencies are unavailable")
 def test_chinese_image_and_scanned_pdf_ocr(tmp_path: Path) -> None:
@@ -139,3 +158,28 @@ def test_text_pdf_keeps_page_number(tmp_path: Path) -> None:
     assert sections[0].location == "page 1"
     assert sections[0].method == "text"
     assert "Warranty period" in sections[0].text
+
+
+def test_large_pdf_page_rejected_before_render(tmp_path: Path) -> None:
+    from reportlab.pdfgen import canvas
+
+    path = tmp_path / "huge.pdf"
+    pdf = canvas.Canvas(str(path), pagesize=(10000, 10000))
+    pdf.showPage()
+    pdf.save()
+    with pytest.raises(ExtractionError, match="50 megapixel"):
+        extract_file(path)
+
+
+def test_multipage_tiff_keeps_all_pages(tmp_path: Path, monkeypatch) -> None:
+    from PIL import Image
+    import ragstudio.extract as extraction
+
+    path = tmp_path / "archive.tiff"
+    first = Image.new("RGB", (10, 10), "white")
+    second = Image.new("RGB", (10, 10), "black")
+    first.save(path, save_all=True, append_images=[second])
+    monkeypatch.setattr(extraction, "_ocr", lambda image, location, _cmd: [Section(str(image.getpixel((0, 0))), location, "ocr")])
+    sections = extract_file(path)
+    assert [s.location for s in sections] == ["page 1", "page 2"]
+    assert sections[0].text != sections[1].text

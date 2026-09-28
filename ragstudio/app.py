@@ -135,6 +135,8 @@ class StudioController(QObject):
             self._error(str(exc))
 
     def add_files(self, paths: list[str]):
+        if self._thread is not None:
+            return
         try:
             project_id = self._project_id()
             added = self.store.add_files(project_id, paths)
@@ -144,6 +146,8 @@ class StudioController(QObject):
             self._error(str(exc))
 
     def remove_file(self, file_id: str):
+        if self._thread is not None:
+            return
         try:
             project_id = self._project_id()
             self.store.remove_file(project_id, file_id)

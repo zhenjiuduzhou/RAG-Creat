@@ -25,6 +25,7 @@ class DifyRequest(BaseModel):
     knowledge_id: str
     query: str = Field(min_length=1, max_length=2000)
     retrieval_setting: RetrievalSetting
+    metadata_condition: dict | None = None
 
 
 def create_app(bundle: Path, token: str | None = None) -> FastAPI:
@@ -40,10 +41,18 @@ def create_app(bundle: Path, token: str | None = None) -> FastAPI:
         if request.method == "POST":
             from fastapi.responses import JSONResponse
 
+            header = request.headers.get("authorization")
+            if token and (not header or not header.startswith("Bearer ") or
+                          not hmac.compare_digest(header[7:], token)):
+                return JSONResponse({"detail": "Unauthorized"}, status_code=401)
             if int(request.headers.get("content-length", "0") or 0) > 65536:
                 return JSONResponse({"detail": "Request too large"}, status_code=413)
-            if len(await request.body()) > 65536:
-                return JSONResponse({"detail": "Request too large"}, status_code=413)
+            body = bytearray()
+            async for chunk in request.stream():
+                if len(body) + len(chunk) > 65536:
+                    return JSONResponse({"detail": "Request too large"}, status_code=413)
+                body.extend(chunk)
+            request._body = bytes(body)
         return await call_next(request)
 
     def authorize(header: str | None) -> None:
@@ -64,6 +73,8 @@ def create_app(bundle: Path, token: str | None = None) -> FastAPI:
     @app.post("/retrieval")
     def retrieval(body: DifyRequest, authorization: str | None = Header(default=None)):
         authorize(authorization)
+        if body.metadata_condition and body.metadata_condition.get("conditions") != []:
+            raise HTTPException(status_code=422, detail="暂不支持 Dify 元数据过滤条件")
         if body.knowledge_id != index.manifest["knowledge_id"]:
             raise HTTPException(status_code=404, detail="Knowledge base not found")
         found = index.search(body.query, body.retrieval_setting.top_k)

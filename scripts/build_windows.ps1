@@ -35,14 +35,15 @@ try {
     $serverRuntime = Join-Path $projectRoot 'dist\ragstudio-server'
     $appRuntime = Join-Path $projectRoot 'dist\RAGStudio\server-runtime'
     if (Test-Path -LiteralPath $appRuntime) {
-        $resolvedRuntime = (Resolve-Path -LiteralPath $appRuntime).Path
-        $resolvedDist = (Resolve-Path -LiteralPath (Join-Path $projectRoot 'dist\RAGStudio')).Path
-        if (-not $resolvedRuntime.StartsWith($resolvedDist + '\', [System.StringComparison]::OrdinalIgnoreCase)) {
-            throw '拒绝删除工作区之外的旧服务运行目录'
-        }
-        Remove-Item -LiteralPath $resolvedRuntime -Recurse -Force
+        throw '桌面程序构建目录仍含旧检索服务，请检查 PyInstaller 是否完成清理'
     }
     Copy-Item -LiteralPath $serverRuntime -Destination $appRuntime -Recurse
+    $developerAssets = Join-Path $projectRoot 'dist\RAGStudio\developer-assets'
+    New-Item -ItemType Directory -Path (Join-Path $developerAssets 'ragstudio') | Out-Null
+    foreach ($name in @('__init__.py', 'embedding.py', 'project.py', 'search.py', 'service.py', 'serve.py')) {
+        Copy-Item -LiteralPath (Join-Path $projectRoot "ragstudio\$name") -Destination (Join-Path $developerAssets 'ragstudio')
+    }
+    Copy-Item -LiteralPath (Join-Path $projectRoot 'requirements.lock') -Destination $developerAssets
     Copy-Item -LiteralPath (Join-Path $projectRoot 'legal') -Destination (Join-Path $projectRoot 'dist\RAGStudio\legal') -Recurse -Force
     Copy-Item -LiteralPath (Join-Path $projectRoot 'THIRD_PARTY.txt') -Destination (Join-Path $projectRoot 'dist\RAGStudio\THIRD_PARTY.txt') -Force
     Copy-Item -LiteralPath (Join-Path $projectRoot 'docs\使用说明.md') -Destination (Join-Path $projectRoot 'dist\RAGStudio\使用说明.md') -Force

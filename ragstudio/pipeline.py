@@ -1,6 +1,7 @@
 """Build a versioned knowledge base without exposing partial results."""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -17,7 +18,7 @@ from .extract import ExtractionError, Section, extract_file
 from .project import ProjectStore, atomic_json, load_json, sha256_file
 from .search import verify_index
 
-EXTRACT_VERSION = 1
+EXTRACT_VERSION = 2
 CHUNK_VERSION = 1
 TARGET_TOKENS = 384
 OVERLAP_TOKENS = 48
@@ -74,13 +75,12 @@ def build_project(store: ProjectStore, project_id: str, embedder, *,
     root = store.root(project_id)
     project = store.get(project_id)
     files = project["files"]
-    if not files:
-        raise ValueError("项目没有资料文件")
     fingerprint = model_fingerprint(model_dir)
     cache = root / "cache"
     cache.mkdir(exist_ok=True)
     all_chunks: list[dict] = []
     matrices: list[np.ndarray] = []
+    used_cache: set[Path] = set()
     errors: list[dict] = []
     progress = progress or (lambda _percent, _message: None)
     _check_cancel(cancel)
@@ -94,10 +94,13 @@ def build_project(store: ProjectStore, project_id: str, embedder, *,
             else:
                 sections = extract_file(root / "sources" / item["path"], tesseract_cmd)
                 atomic_json(extract_cache, [asdict(section) for section in sections])
+            used_cache.add(extract_cache)
             chunks = chunk_sections(sections, embedder, item["id"], item["name"])
             if not chunks:
                 raise ExtractionError("文件没有可用文本块")
-            vector_cache = cache / f"vectors-{item['sha256']}-{CHUNK_VERSION}-{fingerprint[:16]}.npy"
+            text_fingerprint = hashlib.sha256(json.dumps([chunk["text"] for chunk in chunks],
+                                                       ensure_ascii=False).encode("utf-8")).hexdigest()[:16]
+            vector_cache = cache / f"vectors-{item['sha256']}-{EXTRACT_VERSION}-{CHUNK_VERSION}-{text_fingerprint}-{fingerprint[:16]}.npy"
             if vector_cache.is_file():
                 vectors = np.load(vector_cache, allow_pickle=False)
                 if vectors.shape != (len(chunks), embedder.dimension):
@@ -107,6 +110,7 @@ def build_project(store: ProjectStore, project_id: str, embedder, *,
             else:
                 vectors = embedder.encode_passages([chunk["text"] for chunk in chunks])
                 np.save(vector_cache, vectors)
+            used_cache.add(vector_cache)
             _check_cancel(cancel)
             matrices.append(vectors)
             all_chunks.extend(chunks)
@@ -116,8 +120,10 @@ def build_project(store: ProjectStore, project_id: str, embedder, *,
         except Exception as exc:
             item["status"] = "失败"
             errors.append({"file": item["name"], "error": str(exc)})
-    if not all_chunks:
-        atomic_json(root / "project.json", project)
+    if not all_chunks and files:
+        current = store.get(project_id)
+        if [(row["id"], row["sha256"]) for row in current["files"]] == [(row["id"], row["sha256"]) for row in files]:
+            atomic_json(root / "project.json", project)
         detail = "；".join(f"{row['file']}: {row['error']}" for row in errors)
         raise ValueError(f"没有可用文本块。{detail[:1000]}")
     _check_cancel(cancel)
@@ -132,7 +138,8 @@ def build_project(store: ProjectStore, project_id: str, embedder, *,
         with (staging / "chunks.jsonl").open("w", encoding="utf-8") as stream:
             for chunk in all_chunks:
                 stream.write(json.dumps(chunk, ensure_ascii=False) + "\n")
-        np.save(staging / "vectors.npy", np.concatenate(matrices).astype(np.float32))
+        np.save(staging / "vectors.npy", np.concatenate(matrices).astype(np.float32)
+                if matrices else np.empty((0, embedder.dimension), dtype=np.float32))
         model_meta_path = model_dir / "ragstudio-model.json"
         model_meta = load_json(model_meta_path) if model_meta_path.exists() else {}
         manifest = {"format_version": 1, "knowledge_id": project_id, "name": project["name"],
@@ -147,10 +154,18 @@ def build_project(store: ProjectStore, project_id: str, embedder, *,
         atomic_json(staging / "manifest.json", manifest)
         verify_index(staging)
         _check_cancel(cancel)
+        current = store.get(project_id)
+        if [(row["id"], row["sha256"]) for row in current["files"]] != [(row["id"], row["sha256"]) for row in files]:
+            raise BuildCancelled("资料清单已变更，请重新构建")
         os.replace(staging, final)
         atomic_json(root / "current.json", {"version": version})
-        project["dirty"] = False
-        atomic_json(root / "project.json", project)
+        current = store.get(project_id)
+        statuses = {row["id"]: row["status"] for row in files}
+        for row in current["files"]:
+            if row["id"] in statuses:
+                row["status"] = statuses[row["id"]]
+        current["dirty"] = [(row["id"], row["sha256"]) for row in current["files"]] != [(row["id"], row["sha256"]) for row in files]
+        atomic_json(root / "project.json", current)
         # Retain the old version throughout construction, then discard stale
         # source-derived data only after the new index becomes active.
         resolved_versions = versions.resolve()
@@ -160,9 +175,8 @@ def build_project(store: ProjectStore, project_id: str, embedder, *,
                     shutil.rmtree(previous)
                 except OSError:
                     pass  # A running reader may still hold a Windows file handle.
-        active_hashes = {item["sha256"] for item in project["files"]}
         for cached in cache.iterdir():
-            if cached.is_file() and not any(digest in cached.name for digest in active_hashes):
+            if cached.is_file() and cached not in used_cache:
                 cached.unlink(missing_ok=True)
         progress(100, "构建完成")
         return manifest

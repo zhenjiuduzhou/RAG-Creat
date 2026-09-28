@@ -38,7 +38,7 @@ class SearchIndex:
 
     def search(self, query: str, top_k: int = 5) -> list[dict]:
         query = query.strip()
-        if not query:
+        if not query or not self.chunks:
             return []
         top_k = max(1, min(int(top_k), 20))
         q = self.embedder.encode_query(query)

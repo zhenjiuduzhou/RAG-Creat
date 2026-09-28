@@ -33,7 +33,11 @@ def _guide(name: str, knowledge_id: str, mode: str) -> str:
 Windows PowerShell 示例：
 
 ```powershell
-$env:RAG_STUDIO_TOKEN = [Convert]::ToHexString([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
+$bytes = New-Object byte[] 32
+$rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+$rng.GetBytes($bytes)
+$rng.Dispose()
+$env:RAG_STUDIO_TOKEN = -join ($bytes | ForEach-Object {{ $_.ToString('x2') }})
 {lan_start}
 ```
 
@@ -125,15 +129,11 @@ def export_project(store: ProjectStore, project_id: str, destination: Path, mode
         else:
             package = bundle / "ragstudio"
             package.mkdir()
+            source_root = asset_root / "developer-assets" / "ragstudio" if getattr(sys, "frozen", False) else Path(__file__).parent
             for name in ("__init__.py", "embedding.py", "project.py", "search.py", "service.py", "serve.py"):
-                shutil.copy2(Path(__file__).parent / name, package / name)
-            lockfile = Path(__file__).resolve().parents[1] / "requirements.lock"
-            if lockfile.is_file():
-                shutil.copy2(lockfile, bundle / "requirements.txt")
-            else:
-                (bundle / "requirements.txt").write_text(
-                    "sentence-transformers==6.1.0\nnumpy==2.5.3\nfastapi==0.141.1\nuvicorn==0.54.0\n",
-                    encoding="utf-8")
+                shutil.copy2(source_root / name, package / name)
+            lockfile = asset_root / "developer-assets" / "requirements.lock" if getattr(sys, "frozen", False) else asset_root / "requirements.lock"
+            shutil.copy2(lockfile, bundle / "requirements.txt")
         checksums = []
         for file in sorted(bundle.rglob("*")):
             if file.is_file():

@@ -7,7 +7,7 @@ worker thread, which can feed progress and results back through the setters belo
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal, QSettings
-from PySide6.QtGui import QDragEnterEvent, QDropEvent
+from PySide6.QtGui import QCloseEvent, QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QDialog,
@@ -330,12 +330,15 @@ class MainWindow(QMainWindow):
             self.import_files.emit(paths)
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
-        if event.mimeData().hasUrls():
+        if not self._busy and event.mimeData().hasUrls():
             event.acceptProposedAction()
         else:
             event.ignore()
 
     def dropEvent(self, event: QDropEvent) -> None:
+        if self._busy:
+            event.ignore()
+            return
         paths = [u.toLocalFile() for u in event.mimeData().urls() if u.isLocalFile()]
         if paths:
             self.import_files.emit(paths)
@@ -459,3 +462,11 @@ class MainWindow(QMainWindow):
         self.projects.setEnabled(not busy)
         self.new_project_button.setEnabled(not busy)
         self.files_table.setEnabled(not busy)
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        if self._busy:
+            self.cancel_requested.emit()
+            self.set_status("正在停止后台任务，请任务结束后关闭窗口")
+            event.ignore()
+            return
+        super().closeEvent(event)
