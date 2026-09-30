@@ -5,6 +5,10 @@ from pathlib import Path
 
 
 def main():
+    if len(sys.argv) == 4 and sys.argv[1] == "--check-desktop":
+        from ragstudio.desktop_check import check_desktop
+
+        return check_desktop(Path(sys.argv[2]), Path(sys.argv[3]))
     if len(sys.argv) == 4 and sys.argv[1] == "--check-extraction":
         from ragstudio.extract import extract_file
 

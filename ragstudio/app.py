@@ -5,7 +5,7 @@ import sys
 import threading
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QThread, Signal
+from PySide6.QtCore import QObject, QThread, Signal, Slot
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from .embedding import Embedder
@@ -38,6 +38,7 @@ class Worker(QObject):
         super().__init__()
         self.fn = fn
 
+    @Slot()
     def run(self):
         try:
             self.succeeded.emit(self.fn(self.progress.emit))
@@ -59,6 +60,9 @@ class StudioController(QObject):
         self.cancel = threading.Event()
         self._thread = None
         self._worker = None
+        self._task_result = None
+        self._task_error = None
+        self._task_callback = None
         self._connect()
         self.window.set_projects(self.store.list_projects())
         if not self.store.list_projects():
@@ -90,27 +94,54 @@ class StudioController(QObject):
         if self._thread is not None:
             return
         self.cancel.clear()
+        self._task_result = None
+        self._task_error = None
+        self._task_callback = on_success
         self.window.set_busy(True)
         self.window.set_status(initial)
         thread = QThread(self)
         worker = Worker(fn)
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
-        worker.progress.connect(self.window.set_progress)
-        worker.succeeded.connect(on_success)
-        worker.failed.connect(self._error)
+        worker.progress.connect(self._on_progress)
+        worker.succeeded.connect(self._on_result)
+        worker.failed.connect(self._on_failure)
         worker.finished.connect(thread.quit)
         worker.finished.connect(worker.deleteLater)
         thread.finished.connect(thread.deleteLater)
 
-        def cleanup():
-            self._thread = None
-            self._worker = None
-            self.window.set_busy(False)
-
-        thread.finished.connect(cleanup)
+        thread.finished.connect(self._finish_task)
         self._thread, self._worker = thread, worker
         thread.start()
+
+    @Slot(int, str)
+    def _on_progress(self, percent: int, message: str):
+        self.window.set_progress(percent, message)
+
+    @Slot(object)
+    def _on_result(self, result):
+        self._task_result = result
+
+    @Slot(str)
+    def _on_failure(self, message: str):
+        self._task_error = message
+
+    @Slot()
+    def _finish_task(self):
+        callback, result, error = self._task_callback, self._task_result, self._task_error
+        self._thread = None
+        self._worker = None
+        self._task_callback = None
+        self._task_result = None
+        self._task_error = None
+        self.window.set_busy(False)
+        if error:
+            self._error(error)
+        elif callback:
+            try:
+                callback(result)
+            except Exception as exc:
+                self._error(str(exc))
 
     def _get_embedder(self):
         if self.embedder is None:
