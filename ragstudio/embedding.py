@@ -27,8 +27,10 @@ class Embedder:
     def __init__(self, model):
         self.model = model
         self.tokenizer = model.tokenizer
+        self.query_prefix = QUERY_PREFIX
+        self.passage_prefix = PASSAGE_PREFIX
         self.dimension = int(model.get_embedding_dimension())
-        if self.dimension != 384:
+        if not 0 < self.dimension <= 65536:
             raise ValueError(f"模型向量维度异常：{self.dimension}")
 
     @classmethod
@@ -53,13 +55,13 @@ class Embedder:
 
     def encode_passages(self, passages: list[str]) -> np.ndarray:
         return np.asarray(
-            self.model.encode([PASSAGE_PREFIX + text for text in passages],
+            self.model.encode([self.passage_prefix + text for text in passages],
                               batch_size=16, normalize_embeddings=True, show_progress_bar=False,
                               convert_to_numpy=True), dtype=np.float32
         )
 
     def encode_query(self, query: str) -> np.ndarray:
-        vector = self.model.encode(QUERY_PREFIX + query, normalize_embeddings=True,
+        vector = self.model.encode(self.query_prefix + query, normalize_embeddings=True,
                                    show_progress_bar=False, convert_to_numpy=True)
         return np.asarray(vector, dtype=np.float32)
 

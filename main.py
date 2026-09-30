@@ -5,6 +5,9 @@ from pathlib import Path
 
 
 def main():
+    if len(sys.argv) == 5 and sys.argv[1] == "--check-api":
+        from ragstudio.api_check import check_api
+        return check_api(sys.argv[2], sys.argv[3], Path(sys.argv[4]))
     if len(sys.argv) == 4 and sys.argv[1] == "--check-desktop":
         from ragstudio.desktop_check import check_desktop
 

@@ -42,13 +42,14 @@ try {
     Copy-Item -LiteralPath $serverRuntime -Destination $appRuntime -Recurse
     $developerAssets = Join-Path $projectRoot 'dist\RAGStudio\developer-assets'
     New-Item -ItemType Directory -Path (Join-Path $developerAssets 'ragstudio') | Out-Null
-    foreach ($name in @('__init__.py', 'embedding.py', 'project.py', 'search.py', 'service.py', 'serve.py')) {
+    foreach ($name in @('__init__.py', 'embedding.py', 'project.py', 'search.py', 'service.py', 'serve.py', 'providers.py', 'credentials.py')) {
         Copy-Item -LiteralPath (Join-Path $projectRoot "ragstudio\$name") -Destination (Join-Path $developerAssets 'ragstudio')
     }
     Copy-Item -LiteralPath (Join-Path $projectRoot 'requirements.lock') -Destination $developerAssets
     Copy-Item -LiteralPath (Join-Path $projectRoot 'legal') -Destination (Join-Path $projectRoot 'dist\RAGStudio\legal') -Recurse -Force
     Copy-Item -LiteralPath (Join-Path $projectRoot 'THIRD_PARTY.txt') -Destination (Join-Path $projectRoot 'dist\RAGStudio\THIRD_PARTY.txt') -Force
     Copy-Item -LiteralPath (Join-Path $projectRoot 'docs\使用说明.md') -Destination (Join-Path $projectRoot 'dist\RAGStudio\使用说明.md') -Force
+    Copy-Item -LiteralPath (Join-Path $projectRoot 'docs\模型接入.md') -Destination (Join-Path $projectRoot 'dist\RAGStudio\模型接入.md') -Force
     Write-Host "Windows 程序：$(Join-Path $projectRoot 'dist\RAGStudio\RAGStudio.exe')"
     Write-Host "检索服务：$(Join-Path $serverRuntime 'ragstudio-server.exe')"
 } finally {

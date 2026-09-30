@@ -43,6 +43,7 @@ class MainWindow(QMainWindow):
     export_requested = Signal(str, str)
     project_selected = Signal(str)
     preview_requested = Signal(str)
+    model_settings_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -111,6 +112,12 @@ class MainWindow(QMainWindow):
         titles.addWidget(self.project_title)
         titles.addWidget(self.project_subtitle)
         header.addLayout(titles, 1)
+        self.model_button = QPushButton("模型设置")
+        self.model_button.setObjectName("secondaryButton")
+        self.model_button.setAccessibleName("当前项目模型设置")
+        self.model_button.setToolTip("设置当前项目的向量模型")
+        self.model_button.clicked.connect(self.model_settings_requested.emit)
+        header.addWidget(self.model_button, 0, Qt.AlignmentFlag.AlignTop)
         self.theme_button = QPushButton()
         self.theme_button.setObjectName("secondaryButton")
         self.theme_button.setAccessibleName("切换界面主题")
@@ -468,6 +475,11 @@ class MainWindow(QMainWindow):
         self.status_badge.setText(message or "就绪")
         self.statusBar().showMessage(message or "准备就绪")
 
+    def set_model_summary(self, text: str) -> None:
+        summary = text.strip() or "模型设置"
+        self.model_button.setText("模型设置")
+        self.model_button.setToolTip(f"当前模型：{summary}。点击更改")
+
     def set_busy(self, busy: bool) -> None:
         self._busy = bool(busy)
         self.build_button.setEnabled(not busy)
@@ -475,6 +487,7 @@ class MainWindow(QMainWindow):
         self.import_button.setEnabled(not busy)
         self.search_button.setEnabled(not busy)
         self.export_button.setEnabled(not busy)
+        self.model_button.setEnabled(not busy)
         self.projects.setEnabled(not busy)
         self.new_project_button.setEnabled(not busy)
         self.files_table.setEnabled(not busy)

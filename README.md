@@ -1,6 +1,6 @@
 # RAG Studio
 
-RAG Studio 是本机运行的 Windows 知识库制作工具。为每个客户建立项目，导入文档，检查提取结果，构建向量索引并测试检索，然后导出可交付的 ZIP。软件不调用云端大模型，也不会主动上传客户资料。
+RAG Studio 是本机运行的 Windows 知识库制作工具。为每个客户建立项目，导入文档，检查提取结果，构建向量索引并测试检索，然后导出可交付的 ZIP。默认使用本地嵌入模型，可在模型设置中切换到自定义本地模型或 OpenAI 兼容 Embedding API。API 模式会将资料片段与查询发送到配置的模型服务。
 
 ## 运行开发版
 
@@ -12,7 +12,7 @@ python -m venv .venv  # 请使用 Python 3.12
 .\.venv\Scripts\python.exe main.py
 ```
 
-首次构建知识库时下载多语言 E5 模型，约 466 MB；下载完成后解析、向量化和检索均在本机进行。OCR 使用随 RapidOCR Python 包提供的中英文 ONNX 模型，能够离线处理扫描 PDF 和图片。[模型许可及说明](https://huggingface.co/intfloat/multilingual-e5-small/raw/main/README.md)
+使用默认模型时，首次构建知识库或测试模型接入会下载多语言 E5 模型，约 466 MB；下载完成后解析、向量化和检索均在本机进行。OCR 使用随 RapidOCR Python 包提供的中英文 ONNX 模型，能够离线处理扫描 PDF 和图片。[模型许可及说明](https://huggingface.co/intfloat/multilingual-e5-small/raw/main/README.md)
 
 ## Windows 成品
 
@@ -23,6 +23,12 @@ python -m venv .venv  # 请使用 Python 3.12
 打包成功后，`dist/RAGStudio/RAGStudio.exe` 是桌面程序。完整包导出会将 `dist/ragstudio-server` 中的服务运行程序和本地模型一起装入 ZIP，客户解压后运行 `start_windows.cmd`，无需安装 Python。
 
 完整包可能超过 1 GB，因为包含嵌入模型和独立运行环境。`--host 0.0.0.0` 对外开放前，必须设置 `RAG_STUDIO_TOKEN`；还应在企业网关配置 HTTPS、防火墙和访问控制。云端 Dify 无法访问桌面的 `127.0.0.1`，需将导出包部署到它可访问的服务器。软件会在每个导出包内生成更具体的接入指南。
+
+## 模型接入
+
+点击项目右上方“模型设置”。支持内置 E5、完整 Sentence Transformers 模型目录，以及云端或本机 OpenAI 兼容 embeddings API。密钥使用 Windows DPAPI 加密保存；不同客户项目可以分别选择模型。详见 [模型接入说明](docs/模型接入.md)。
+
+本地模型可离线使用；API 模式需要模型服务可访问。API 模式导出包不包含模型权重或 API Key，客户需配置环境变量 `RAG_STUDIO_EMBEDDING_KEY`。更换模型后必须重建。
 
 ## 资料与限制
 

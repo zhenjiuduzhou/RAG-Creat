@@ -30,6 +30,8 @@ class SearchIndex:
         self.manifest = verify_index(self.folder)
         if self.manifest["dimension"] != embedder.dimension:
             raise ValueError("检索模型与向量维度不一致")
+        if self.manifest.get("embedding_profile") and self.manifest["model_fingerprint"] != getattr(embedder, "fingerprint", None):
+            raise ValueError("模型或模型配置已变更，请重新构建知识库")
         self.embedder = embedder
         self.vectors = np.load(self.folder / "vectors.npy", mmap_mode="r", allow_pickle=False)
         self.chunks = [json.loads(line) for line in (self.folder / "chunks.jsonl").read_text(encoding="utf-8").splitlines()]

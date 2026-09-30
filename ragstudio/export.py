@@ -11,6 +11,7 @@ from importlib import metadata
 from pathlib import Path
 
 from .embedding import Embedder, model_fingerprint
+from .providers import load_provider
 from .pipeline import active_index
 from .project import ProjectStore, sha256_file
 from .search import SearchIndex
@@ -42,6 +43,14 @@ $env:RAG_STUDIO_TOKEN = -join ($bytes | ForEach-Object {{ $_.ToString('x2') }})
 ```
 
 将当前终端的 `$env:RAG_STUDIO_TOKEN` 值作为工作流的 Bearer API Key；不要把它写入导出包。
+
+## 服务器部署与聊天大模型
+
+本服务返回检索片段，聊天大模型在 Dify 或你的应用中另行配置。
+工作流顺序：用户问题 → 知识库检索 → 将片段及出处传给聊天大模型 → 生成回答。
+部署到 Windows 服务器仍使用 start_windows.cmd；当前 EXE 不支持直接在 Linux 上运行。
+同一内网的工作流可访问服务器内网 IP，无需内网穿透；云端工作流需要可达服务器、VPN 或受控隧道。
+长期运行请由客户运维配置 Windows 服务或受管理进程，命令窗口关闭会停止检索服务。
 
 ## 通用工作流
 
@@ -91,7 +100,7 @@ def _license_inventory() -> str:
 
 
 def export_project(store: ProjectStore, project_id: str, destination: Path, mode: str,
-                   model_dir: Path, server_runtime: Path | None = None) -> Path:
+                   model_dir: Path, server_runtime: Path | None = None, *, embedder=None) -> Path:
     if mode not in ("windows-full", "developer"):
         raise ValueError("未知导出类型")
     root = store.root(project_id)
@@ -99,8 +108,13 @@ def export_project(store: ProjectStore, project_id: str, destination: Path, mode
     if project.get("dirty", False):
         raise ValueError("资料有变更，请重新构建知识库后再导出")
     source_index = active_index(root)
-    manifest = SearchIndex(source_index, Embedder.load(model_dir, allow_download=False)).manifest
-    if model_fingerprint(model_dir) != manifest["model_fingerprint"]:
+    if embedder is None:
+        embedder = load_provider(project["embedding"], store.home, allow_download=False) if project.get("embedding") else Embedder.load(model_dir, allow_download=False)
+    manifest = SearchIndex(source_index, embedder).manifest
+    api_mode = manifest.get("embedding_profile", {}).get("provider") == "api"
+    if project.get("embedding", {}).get("provider") == "local":
+        model_dir = Path(project["embedding"]["local_path"])
+    if not manifest.get("embedding_profile") and model_fingerprint(model_dir) != manifest["model_fingerprint"]:
         raise ValueError("模型文件与当前索引不一致")
     destination = Path(destination)
     destination.mkdir(parents=True, exist_ok=True)
@@ -111,8 +125,14 @@ def export_project(store: ProjectStore, project_id: str, destination: Path, mode
         bundle = Path(temp) / "bundle"
         bundle.mkdir()
         shutil.copytree(source_index, bundle / "data")
-        shutil.copytree(model_dir, bundle / "model")
-        (bundle / "README.md").write_text(_guide(project["name"], project_id, mode), encoding="utf-8")
+        if not api_mode:
+            shutil.copytree(model_dir, bundle / "model")
+        guide = _guide(project["name"], project_id, mode)
+        if api_mode:
+            guide += "\n## 外部嵌入模型\n\n本包使用外部模型服务，运行时必须可访问 manifest 中的 endpoint。\n在启动终端设置 `$env:RAG_STUDIO_EMBEDDING_KEY = '你的模型 API Key'`，然后启动服务。\n此密钥与 RAG_STUDIO_TOKEN（工作流访问令牌）不同，密钥未包含在包中。\n外部服务必须提供构建时相同的模型、维度与版本；替换模型后需要重建。\n"
+        else:
+            guide += "\n## 模型许可\n\n自定义模型的授权范围以 model 目录中的许可证为准，交付前确认允许企业使用和再分发。\n"
+        (bundle / "README.md").write_text(guide, encoding="utf-8")
         asset_root = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parents[1]
         notices = asset_root / "THIRD_PARTY.txt"
         if notices.is_file():
@@ -130,7 +150,7 @@ def export_project(store: ProjectStore, project_id: str, destination: Path, mode
             package = bundle / "ragstudio"
             package.mkdir()
             source_root = asset_root / "developer-assets" / "ragstudio" if getattr(sys, "frozen", False) else Path(__file__).parent
-            for name in ("__init__.py", "embedding.py", "project.py", "search.py", "service.py", "serve.py"):
+            for name in ("__init__.py", "embedding.py", "project.py", "search.py", "service.py", "serve.py", "providers.py", "credentials.py"):
                 shutil.copy2(source_root / name, package / name)
             lockfile = asset_root / "developer-assets" / "requirements.lock" if getattr(sys, "frozen", False) else asset_root / "requirements.lock"
             shutil.copy2(lockfile, bundle / "requirements.txt")
@@ -139,7 +159,10 @@ def export_project(store: ProjectStore, project_id: str, destination: Path, mode
             if file.is_file():
                 checksums.append(f"{sha256_file(file)}  {file.relative_to(bundle).as_posix()}")
         (bundle / "checksums.sha256").write_text("\n".join(checksums) + "\n", encoding="utf-8")
-        SearchIndex(bundle / "data", Embedder.load(bundle / "model", allow_download=False)).search("测试", 1)
+        portable = embedder if api_mode else (
+            load_provider(manifest["embedding_profile"], store.home, allow_download=False, bundle_model=bundle / "model")
+            if manifest.get("embedding_profile") else Embedder.load(bundle / "model", allow_download=False))
+        SearchIndex(bundle / "data", portable).search("测试", 1)
         pending = archive.with_suffix(".zip.tmp")
         with zipfile.ZipFile(pending, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=4) as output:
             for file in bundle.rglob("*"):

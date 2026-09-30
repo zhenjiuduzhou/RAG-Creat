@@ -37,7 +37,8 @@ def active_index(root: Path) -> Path:
 
 def chunk_sections(sections: list[Section], embedder, file_id: str, filename: str) -> list[dict]:
     chunks: list[dict] = []
-    prefix_tokens = len(embedder.tokenize(PASSAGE_PREFIX))
+    passage_prefix = getattr(embedder, "passage_prefix", PASSAGE_PREFIX)
+    prefix_tokens = len(embedder.tokenize(passage_prefix))
     max_seq = int(getattr(embedder.model, "max_seq_length", 512) or 512)
     special = int(embedder.tokenizer.num_special_tokens_to_add(pair=False))
     target = min(TARGET_TOKENS, max_seq - prefix_tokens - special)
@@ -52,7 +53,7 @@ def chunk_sections(sections: list[Section], embedder, file_id: str, filename: st
             end = min(start + target, len(tokens))
             text = embedder.decode(tokens[start:end])
             if text:
-                if len(embedder.tokenize(PASSAGE_PREFIX + text)) + special > max_seq:
+                if len(embedder.tokenize(passage_prefix + text)) + special > max_seq:
                     raise ValueError("文本块超过模型最大输入长度")
                 chunks.append({"id": uuid.uuid5(uuid.NAMESPACE_URL, f"{file_id}:{section.location}:{start}").hex,
                                "file_id": file_id, "source": filename, "location": section.location,
@@ -75,7 +76,7 @@ def build_project(store: ProjectStore, project_id: str, embedder, *,
     root = store.root(project_id)
     project = store.get(project_id)
     files = project["files"]
-    fingerprint = model_fingerprint(model_dir)
+    fingerprint = getattr(embedder, "fingerprint", None) or model_fingerprint(model_dir)
     cache = root / "cache"
     cache.mkdir(exist_ok=True)
     all_chunks: list[dict] = []
@@ -143,14 +144,18 @@ def build_project(store: ProjectStore, project_id: str, embedder, *,
         model_meta_path = model_dir / "ragstudio-model.json"
         model_meta = load_json(model_meta_path) if model_meta_path.exists() else {}
         manifest = {"format_version": 1, "knowledge_id": project_id, "name": project["name"],
-                    "model_id": MODEL_ID, "model_revision": model_meta.get("revision", "local"),
+                    "model_id": getattr(embedder, "profile", {}).get("model_id", MODEL_ID),
+                    "model_revision": getattr(embedder, "profile", {}).get("revision", model_meta.get("revision", "local")),
                     "model_fingerprint": fingerprint, "dimension": embedder.dimension,
-                    "normalization": "l2", "query_prefix": QUERY_PREFIX,
-                    "passage_prefix": PASSAGE_PREFIX, "chunk_version": CHUNK_VERSION,
+                    "normalization": "l2", "query_prefix": getattr(embedder, "query_prefix", QUERY_PREFIX),
+                    "passage_prefix": getattr(embedder, "passage_prefix", PASSAGE_PREFIX), "chunk_version": CHUNK_VERSION,
                     "chunk_count": len(all_chunks), "errors": errors,
                     "sources": [{"id": item["id"], "name": item["name"], "sha256": item["sha256"]}
                                 for item in files],
                     "files": {name: sha256_file(staging / name) for name in ("chunks.jsonl", "vectors.npy")}}
+        if hasattr(embedder, "profile"):
+            manifest["embedding_profile"] = embedder.profile
+            manifest["chunk_units"] = "characters" if embedder.profile["provider"] == "api" else "tokens"
         atomic_json(staging / "manifest.json", manifest)
         verify_index(staging)
         _check_cancel(cancel)

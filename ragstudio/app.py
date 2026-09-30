@@ -9,6 +9,10 @@ from PySide6.QtCore import QObject, QThread, Signal, Slot
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from .embedding import Embedder
+from .providers import load_provider, install_local
+from .credentials import CredentialStore
+from .model_dialog import ModelSettingsDialog
+from .project import atomic_json
 from .export import export_project
 from .extract import extract_file
 from .pipeline import BuildCancelled, active_index, build_project
@@ -70,6 +74,7 @@ class StudioController(QObject):
 
     def _connect(self):
         w = self.window
+        w.model_settings_requested.connect(self.model_settings)
         w.create_project.connect(self.create_project)
         w.project_selected.connect(self.select_project)
         w.import_files.connect(self.add_files)
@@ -108,7 +113,6 @@ class StudioController(QObject):
         worker.failed.connect(self._on_failure)
         worker.finished.connect(thread.quit)
         worker.finished.connect(worker.deleteLater)
-        thread.finished.connect(thread.deleteLater)
 
         thread.finished.connect(self._finish_task)
         self._thread, self._worker = thread, worker
@@ -128,6 +132,11 @@ class StudioController(QObject):
 
     @Slot()
     def _finish_task(self):
+        # finished is emitted before native thread-local destructors finish.
+        # Join before callbacks may close dialogs or the application.
+        if self._thread is not None:
+            self._thread.wait()
+            self._thread.deleteLater()
         callback, result, error = self._task_callback, self._task_result, self._task_error
         self._thread = None
         self._worker = None
@@ -143,10 +152,68 @@ class StudioController(QObject):
             except Exception as exc:
                 self._error(str(exc))
 
-    def _get_embedder(self):
+    def _get_embedder(self, project_id=None):
+        project = self.store.get(project_id or self._project_id())
+        profile = project.get("embedding", {"provider": "builtin"})
         if self.embedder is None:
-            self.embedder = Embedder.load(self.model_dir)
+            self.embedder = load_provider(profile, self.store.home, bundle_model=self.model_dir if profile.get("provider", "builtin") == "builtin" and self.model_dir.is_dir() else None)
         return self.embedder
+
+    def model_settings(self):
+        try:
+            project_id = self._project_id()
+            project = self.store.get(project_id)
+        except Exception as exc:
+            self._error(str(exc))
+            return
+        dialog = ModelSettingsDialog(project.get("embedding", {"provider": "builtin"}), self.window)
+
+        def apply(profile, key):
+            dialog.set_pending(True)
+
+            def work(progress):
+                try:
+                    progress(0, "验证模型接入")
+                    if profile["provider"] == "local":
+                        profile["local_path"] = str(install_local(Path(profile["local_path"]), self.store.home))
+                    embedder = load_provider(profile, self.store.home, key=key or None)
+                    embedder.encode_query("模型连接测试")
+                    saved = dict(embedder.profile)
+                    if profile["provider"] == "local":
+                        saved["local_path"] = profile["local_path"]
+                    if profile["provider"] == "api" and key:
+                        CredentialStore(self.store.home).save(saved, key)
+                    return saved, embedder, None
+                except Exception as exc:
+                    return None, None, str(exc)
+
+            def done(result):
+                saved, embedder, error = result
+                dialog.set_pending(False)
+                if error:
+                    dialog.show_error(error)
+                    return
+                current = self.store.get(project_id)
+                if current.get("embedding") != saved:
+                    current["embedding"] = saved
+                    current["dirty"] = True
+                    atomic_json(self.store.root(project_id) / "project.json", current)
+                self.embedder = embedder
+                self._update_model_summary(current)
+                self.window.set_results([])
+                self.window.set_status(f"模型已验证 · {embedder.dimension} 维；请重新构建知识库")
+                dialog.accept()
+
+            self._start(work, done, "正在验证模型")
+
+        dialog.apply_requested.connect(apply)
+        dialog.exec()
+        dialog.deleteLater()
+
+    def _update_model_summary(self, project):
+        profile = project.get("embedding", {})
+        label = {"api": "API", "local": "本地", "builtin": "内置"}.get(profile.get("provider", "builtin"), "本地")
+        self.window.set_model_summary(f"{label} · {profile.get('model_id', 'multilingual-e5-small')} · {profile.get('dimension', 384)} 维")
 
     def create_project(self, name: str):
         try:
@@ -160,6 +227,8 @@ class StudioController(QObject):
     def select_project(self, project_id: str):
         try:
             project = self.store.get(project_id)
+            self.embedder = None
+            self._update_model_summary(project)
             self.window.set_files(project["files"])
             self.window.set_results([])
         except Exception as exc:
@@ -226,8 +295,9 @@ class StudioController(QObject):
             return
 
         def work(progress):
-            progress(0, "加载本地模型；首次使用需要下载")
-            embedder = self._get_embedder()
+            progress(0, "加载项目模型；API 模式需要连接模型服务")
+            embedder = self._get_embedder(project_id)
+            embedder.cancel = self.cancel
             return build_project(self.store, project_id, embedder, model_dir=self.model_dir,
                                  progress=progress, cancel=self.cancel, tesseract_cmd=tesseract_path())
 
@@ -252,7 +322,7 @@ class StudioController(QObject):
             return
 
         def work(_progress):
-            return SearchIndex(active_index(root), self._get_embedder()).search(query)
+            return SearchIndex(active_index(root), self._get_embedder(project_id)).search(query)
 
         self._start(work, self.window.set_results, "正在检索")
 
@@ -267,7 +337,7 @@ class StudioController(QObject):
 
         def work(progress):
             progress(0, "校验并打包")
-            return export_project(self.store, project_id, Path(destination), mode, self.model_dir, runtime)
+            return export_project(self.store, project_id, Path(destination), mode, self.model_dir, runtime, embedder=self._get_embedder(project_id))
 
         def done(path):
             self.window.set_status(f"已导出：{path}")
