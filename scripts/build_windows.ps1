@@ -16,6 +16,8 @@ try {
     & $pyinstaller --noconfirm --onedir --windowed --name RAGStudio `
         --collect-all sentence_transformers --collect-all transformers --collect-all tokenizers `
         --collect-all rapidocr --collect-all pypdfium2 `
+        --collect-all docx --collect-all pptx --collect-all openpyxl `
+        --collect-all pypdf --collect-all bs4 --collect-all PIL `
         --hidden-import uvicorn.logging --hidden-import uvicorn.loops.auto `
         --hidden-import uvicorn.protocols.http.auto --hidden-import uvicorn.lifespan.on main.py
     if ($LASTEXITCODE -ne 0) { throw '桌面程序打包失败' }

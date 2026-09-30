@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QComboBox,
+    QScrollArea,
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
@@ -90,10 +91,16 @@ class MainWindow(QMainWindow):
         root_layout.addWidget(side)
 
         content = QWidget()
+        content.setMinimumHeight(820)
         content_layout = QVBoxLayout(content)
         content_layout.setContentsMargins(32, 22, 32, 24)
         content_layout.setSpacing(18)
-        root_layout.addWidget(content, 1)
+        content_scroll = QScrollArea()
+        content_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        content_scroll.setWidgetResizable(True)
+        content_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        content_scroll.setWidget(content)
+        root_layout.addWidget(content_scroll, 1)
 
         header = QHBoxLayout()
         titles = QVBoxLayout()
@@ -153,7 +160,9 @@ class MainWindow(QMainWindow):
         self.files_table.horizontalHeader().setSectionResizeMode(1, self.files_table.horizontalHeader().ResizeMode.ResizeToContents)
         self.files_table.horizontalHeader().setSectionResizeMode(2, self.files_table.horizontalHeader().ResizeMode.ResizeToContents)
         self.files_table.setAccessibleName("项目文件")
+        self.files_table.setMinimumHeight(150)
         top_layout.addWidget(self.files_table, 1)
+        top_panel.setMinimumHeight(320)
         splitter.addWidget(top_panel)
 
         bottom = QWidget()
@@ -212,6 +221,7 @@ class MainWindow(QMainWindow):
         self.export_button.clicked.connect(self._export)
         export_row.addWidget(self.export_button)
         bottom_layout.addLayout(export_row)
+        bottom.setMinimumHeight(360)
         splitter.addWidget(bottom)
         splitter.setSizes([390, 340])
 
@@ -401,7 +411,7 @@ class MainWindow(QMainWindow):
             action_layout.addWidget(preview)
             action_layout.addWidget(remove)
             self.files_table.setCellWidget(row, 2, actions)
-            self.files_table.setRowHeight(row, 46)
+            self.files_table.setRowHeight(row, max(56, actions.sizeHint().height() + 8))
 
     def show_preview(self, text: str) -> None:
         dialog = QDialog(self)
