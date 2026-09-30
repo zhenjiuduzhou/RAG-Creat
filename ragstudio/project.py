@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 import hashlib
+import copy
 import json
 import os
 import shutil
+import sys
+import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,10 +15,52 @@ from pathlib import Path
 
 def default_home() -> Path:
     override = os.getenv("RAG_STUDIO_HOME")
-    return Path(override) if override else Path(os.getenv("LOCALAPPDATA", Path.home())) / "RAGStudio"
+    if override:
+        return Path(override)
+    base = Path(sys.executable).resolve().parent.parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parents[1] / "dist"
+    return base / "RAGStudioDate"
+
+
+def migrate_legacy_home(destination: Path, legacy: Path | None = None) -> bool:
+    """Verify a complete copy before activating the new data directory."""
+    legacy = Path(legacy) if legacy is not None else Path(os.getenv("LOCALAPPDATA", Path.home())) / "RAGStudio"
+    destination = Path(destination)
+    if destination.exists() or not legacy.is_dir() or destination.resolve() == legacy.resolve():
+        return False
+    if legacy.is_symlink() or legacy.is_junction():
+        raise ValueError("旧数据目录包含外部链接，无法自动迁移")
+    for file in legacy.rglob("*"):
+        if file.is_symlink() or file.is_junction():
+            raise ValueError("旧数据目录包含外部链接，无法自动迁移")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix=".ragstudio-migration-", dir=destination.parent))
+    try:
+        shutil.copytree(legacy, staging, dirs_exist_ok=True)
+        for source in legacy.rglob("*"):
+            if source.is_file() and sha256_file(source) != sha256_file(staging / source.relative_to(legacy)):
+                raise ValueError("数据迁移校验失败，原目录保持不变")
+        for file in (staging / "projects").glob("*/project.json"):
+            project = load_json(file)
+            profile = project.get("embedding", {})
+            raw = profile.get("local_path")
+            if raw and Path(raw).is_absolute() and Path(raw).resolve().is_relative_to(legacy.resolve()):
+                profile["local_path"] = Path(raw).resolve().relative_to(legacy.resolve()).as_posix()
+                atomic_json(file, project)
+        atomic_json(staging / "migration.json", {"from": str(legacy), "verified": True})
+        os.rename(staging, destination)
+        return True
+    finally:
+        if staging.exists():
+            shutil.rmtree(staging)
 
 
 def atomic_json(path: Path, value: dict) -> None:
+    if path.name == "project.json" and isinstance(value, dict):
+        raw = value.get("embedding", {}).get("local_path")
+        data_home = path.parent.parent.parent.resolve()
+        if raw and Path(raw).is_absolute() and Path(raw).resolve().is_relative_to(data_home):
+            value = copy.deepcopy(value)
+            value["embedding"]["local_path"] = Path(raw).resolve().relative_to(data_home).as_posix()
     path.parent.mkdir(parents=True, exist_ok=True)
     temp = path.with_name(path.name + ".tmp")
     temp.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -37,6 +82,8 @@ def sha256_file(path: Path) -> str:
 class ProjectStore:
     def __init__(self, home: Path | None = None):
         self.home = Path(home or default_home())
+        if home is None and not os.getenv("RAG_STUDIO_HOME"):
+            migrate_legacy_home(self.home)
         self.projects = self.home / "projects"
         self.projects.mkdir(parents=True, exist_ok=True)
 
@@ -71,7 +118,16 @@ class ProjectStore:
         return root
 
     def get(self, project_id: str) -> dict:
-        return load_json(self.root(project_id) / "project.json")
+        project = load_json(self.root(project_id) / "project.json")
+        profile = project.get("embedding", {})
+        raw = profile.get("local_path")
+        if raw:
+            path = Path(raw)
+            if not path.is_absolute():
+                profile["local_path"] = str(self.home / path)
+            elif not path.is_dir() and (self.home / "models" / "local" / path.name).is_dir():
+                profile["local_path"] = str(self.home / "models" / "local" / path.name)
+        return project
 
     def delete_project(self, project_id: str) -> None:
         """Delete only this project's managed data, never shared model storage."""

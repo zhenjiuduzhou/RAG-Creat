@@ -24,6 +24,10 @@ python -m venv .venv  # 请使用 Python 3.12
 
 完整包可能超过 1 GB，因为包含嵌入模型和独立运行环境。`--host 0.0.0.0` 对外开放前，必须设置 `RAG_STUDIO_TOKEN`；还应在企业网关配置 HTTPS、防火墙和访问控制。云端 Dify 无法访问桌面的 `127.0.0.1`，需将导出包部署到它可访问的服务器。软件会在每个导出包内生成更具体的接入指南。
 
+## 数据位置
+
+默认项目、模型、密钥和界面设置保存在与程序目录并列的 `dist/RAGStudioDate`。移动程序时一起移动 `RAGStudio`、`ragstudio-server`、`RAGStudioDate` 三个文件夹。数据目录不在打包输出目录内，重新构建程序不会清理它。模型下载缓存和导出临时文件也位于该数据目录。
+
 ## 模型接入
 
 点击项目右上方“模型设置”。支持内置 E5、完整 Sentence Transformers 模型目录，以及云端或本机 OpenAI 兼容 embeddings API。密钥使用 Windows DPAPI 加密保存；不同客户项目可以分别选择模型。详见 [模型接入说明](docs/模型接入.md)。

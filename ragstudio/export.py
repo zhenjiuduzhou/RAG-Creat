@@ -121,7 +121,9 @@ def export_project(store: ProjectStore, project_id: str, destination: Path, mode
     archive = destination / f"ragstudio-{project_id[:8]}-{mode}.zip"
     if mode == "windows-full" and (not server_runtime or not (server_runtime / "ragstudio-server.exe").is_file()):
         raise FileNotFoundError("Windows 检索服务尚未打包；请先运行 scripts/build_windows.ps1")
-    with tempfile.TemporaryDirectory(prefix="ragstudio-export-") as temp:
+    temp_root = store.home / "temp"
+    temp_root.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="ragstudio-export-", dir=temp_root) as temp:
         bundle = Path(temp) / "bundle"
         bundle.mkdir()
         shutil.copytree(source_index, bundle / "data")

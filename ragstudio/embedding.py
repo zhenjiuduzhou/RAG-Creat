@@ -46,7 +46,8 @@ class Embedder:
         from huggingface_hub import HfApi
 
         revision = HfApi().model_info(MODEL_ID).sha
-        model = SentenceTransformer(MODEL_ID, revision=revision, device="cpu")
+        model = SentenceTransformer(MODEL_ID, revision=revision, device="cpu",
+                                    cache_folder=str(folder.parent / "download-cache"))
         model.save(str(folder))
         (folder / "ragstudio-model.json").write_text(
             json.dumps({"id": MODEL_ID, "revision": revision}, indent=2), encoding="utf-8"

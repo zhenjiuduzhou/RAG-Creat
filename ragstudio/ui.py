@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal, QSettings, QSize
 from PySide6.QtGui import QCloseEvent, QDragEnterEvent, QDropEvent
+from .project import default_home
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QDialog,
@@ -55,7 +56,11 @@ class MainWindow(QMainWindow):
         self.setAcceptDrops(True)
         self._files: list[dict] = []
         self._busy = False
-        self._settings = QSettings("RAGStudio", "RAGStudio")
+        self._settings = QSettings(str(default_home() / "ui.ini"), QSettings.Format.IniFormat)
+        if not self._settings.contains("ui/theme"):
+            previous = QSettings("RAGStudio", "RAGStudio")
+            self._settings.setValue("ui/theme", previous.value("ui/theme", "dark"))
+            self._settings.sync()
         self._theme = str(self._settings.value("ui/theme", "dark"))
         if self._theme not in {"dark", "light"}:
             self._theme = "dark"
