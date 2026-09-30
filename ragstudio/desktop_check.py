@@ -8,7 +8,7 @@ import threading
 from pathlib import Path
 
 from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QApplication, QDialog
+from PySide6.QtWidgets import QApplication, QDialog, QMessageBox, QPushButton
 
 from .app import StudioController
 
@@ -47,7 +47,10 @@ def check_desktop(model_dir: Path, output: Path) -> int:
             for widget in app.topLevelWidgets():
                 if isinstance(widget, QDialog) and widget.isVisible():
                     state["dialogs"] += 1
-                    widget.accept()
+                    if isinstance(widget, QMessageBox):
+                        widget.button(QMessageBox.StandardButton.Yes).click()
+                    else:
+                        widget.accept()
                     return
             if controller._thread is not None:
                 return
@@ -63,7 +66,12 @@ def check_desktop(model_dir: Path, output: Path) -> int:
             elif stage == 3:
                 assert controller.window.results.count() > 0
                 controller.preview(file_id)
+            elif stage == 4:
+                row = controller.window.projects.itemWidget(controller.window.projects.currentItem())
+                QTimer.singleShot(0, row.findChild(QPushButton).click)
             else:
+                state["deleted"] = not (controller.store.projects / project["id"]).exists()
+                assert state["deleted"] and controller.window.projects.count() == 0
                 state["visible"] = controller.window.isVisible()
                 state["busy"] = controller.window._busy
                 app.exit(0)

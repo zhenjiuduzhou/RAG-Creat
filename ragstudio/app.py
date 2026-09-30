@@ -77,6 +77,7 @@ class StudioController(QObject):
         w.model_settings_requested.connect(self.model_settings)
         w.create_project.connect(self.create_project)
         w.project_selected.connect(self.select_project)
+        w.delete_project_requested.connect(self.delete_project)
         w.import_files.connect(self.add_files)
         w.remove_file.connect(self.remove_file)
         w.preview_requested.connect(self.preview)
@@ -233,6 +234,37 @@ class StudioController(QObject):
             self.window.set_results([])
         except Exception as exc:
             self._error(str(exc))
+
+    def delete_project(self, project_id: str):
+        if self._thread is not None:
+            return
+        try:
+            project = self.store.get(project_id)
+        except Exception as exc:
+            self._error(str(exc))
+            return
+        answer = QMessageBox.question(
+            self.window, "删除项目",
+            f"确定永久删除项目“{project['name']}”？\n\n"
+            "将删除本项目的资料副本、提取缓存、向量索引和构建记录。\n"
+            "原始文件、共享模型和已经导出的 ZIP 保留。此操作无法撤销。",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+
+        def done(_result):
+            self.embedder = None
+            self.window.set_projects(self.store.list_projects())
+            current = self.window.current_project_id()
+            if current:
+                self.select_project(current)
+            else:
+                self.window.set_model_summary("")
+            self.window.set_status(f"已删除项目：{project['name']}")
+
+        self._start(lambda _progress: self.store.delete_project(project_id), done, "正在删除项目")
 
     def add_files(self, paths: list[str]):
         if self._thread is not None:

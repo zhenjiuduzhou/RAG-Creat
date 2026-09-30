@@ -73,6 +73,17 @@ class ProjectStore:
     def get(self, project_id: str) -> dict:
         return load_json(self.root(project_id) / "project.json")
 
+    def delete_project(self, project_id: str) -> None:
+        """Delete only this project's managed data, never shared model storage."""
+        root = self.root(project_id)
+        projects = self.projects.resolve()
+        if root.is_symlink() or root.is_junction() or root.resolve().parent != projects:
+            raise ValueError("拒绝删除项目目录之外的数据")
+        for child in root.rglob("*"):
+            if child.is_symlink() or child.is_junction():
+                raise ValueError("项目目录包含外部链接，请先移除链接再删除项目")
+        shutil.rmtree(root)
+
     def add_files(self, project_id: str, paths: list[str]) -> list[dict]:
         root = self.root(project_id)
         project = self.get(project_id)

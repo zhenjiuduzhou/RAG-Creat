@@ -6,7 +6,7 @@ worker thread, which can feed progress and results back through the setters belo
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal, QSettings
+from PySide6.QtCore import Qt, Signal, QSettings, QSize
 from PySide6.QtGui import QCloseEvent, QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QProgressBar,
     QPushButton,
+    QSizePolicy,
     QComboBox,
     QScrollArea,
     QSplitter,
@@ -42,6 +43,7 @@ class MainWindow(QMainWindow):
     search_requested = Signal(str)
     export_requested = Signal(str, str)
     project_selected = Signal(str)
+    delete_project_requested = Signal(str)
     preview_requested = Signal(str)
     model_settings_requested = Signal()
 
@@ -333,7 +335,7 @@ class MainWindow(QMainWindow):
     def _on_project_changed(self, current: QListWidgetItem | None, _previous: QListWidgetItem | None) -> None:
         if current:
             pid = str(current.data(Qt.ItemDataRole.UserRole) or "")
-            self.project_title.setText(current.text())
+            self.project_title.setText(str(current.data(Qt.ItemDataRole.UserRole + 1) or current.text()))
             self.project_selected.emit(pid)
 
     def _create_project_dialog(self) -> None:
@@ -377,14 +379,41 @@ class MainWindow(QMainWindow):
         self.projects.blockSignals(True)
         self.projects.clear()
         for project in projects:
-            item = QListWidgetItem(str(project.get("name", "未命名项目")))
+            name = str(project.get("name", "未命名项目"))
+            item = QListWidgetItem("")
             item.setData(Qt.ItemDataRole.UserRole, str(project.get("id", "")))
+            item.setData(Qt.ItemDataRole.UserRole + 1, name)
             self.projects.addItem(item)
+            item.setSizeHint(QSize(0, 56))
+            row = QWidget()
+            row.setStyleSheet("background: transparent;")
+            layout = QHBoxLayout(row)
+            layout.setContentsMargins(10, 6, 6, 6)
+            label = QLabel(name)
+            label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            label.setMinimumWidth(0)
+            label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+            label.setToolTip(name)
+            layout.addWidget(label, 1)
+            delete = QPushButton("删除")
+            delete.setFixedSize(52, 34)
+            delete.setStyleSheet("font-family: 'Microsoft YaHei UI'; font-size: 13px; font-weight: 400; padding: 2px 4px;")
+            delete.setAccessibleName(f"删除项目 {name}")
+            delete.setToolTip("删除此项目的资料、缓存和本地知识库")
+            delete.clicked.connect(lambda _checked=False, pid=str(project["id"]): self.delete_project_requested.emit(pid))
+            layout.addWidget(delete)
+            self.projects.setItemWidget(item, row)
             if item.data(Qt.ItemDataRole.UserRole) == selected:
                 self.projects.setCurrentItem(item)
         self.projects.blockSignals(False)
         if self.projects.count() and self.projects.currentRow() < 0:
             self.projects.setCurrentRow(0)
+        if not self.projects.count():
+            self.project_title.setText("选择一个项目")
+            self.set_files([])
+            self.set_results([])
+            self.query_input.clear()
+            self.set_progress(0, "")
 
     def current_project_id(self) -> str:
         item = self.projects.currentItem()
