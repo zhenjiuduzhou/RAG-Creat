@@ -81,6 +81,7 @@ class MainWindow(QMainWindow):
         side_layout.addWidget(brand)
         side_layout.addWidget(self._eyebrow("工作区"))
         self.projects = QListWidget()
+        self.projects.setObjectName("projects")
         self.projects.setAccessibleName("项目列表")
         self.projects.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.projects.currentItemChanged.connect(self._on_project_changed)
@@ -324,7 +325,7 @@ class MainWindow(QMainWindow):
             QStatusBar { color: #69778d; background: #f5f7fb; }
             QSplitter::handle { height: 10px; background: transparent; }
         """
-        self.setStyleSheet(dark if self._theme == "dark" else light)
+        self.setStyleSheet((dark if self._theme == "dark" else light) + "\nQListWidget#projects::item { padding: 0; margin: 2px 0; }")
         self.theme_button.setText("☀  浅色模式" if self._theme == "dark" else "☾  深色模式")
 
     def _toggle_theme(self) -> None:
