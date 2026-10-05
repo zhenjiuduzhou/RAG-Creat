@@ -15,11 +15,19 @@ from ragstudio.pipeline import BuildCancelled
 class Handler(BaseHTTPRequestHandler):
     requests = []
     vector = [3, 4]
+    index_mode = "normal"
+    vectors = {}
 
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         self.requests.append((body, self.headers.get("Authorization")))
-        rows = [{"index": i, "embedding": self.vector} for i in range(len(body["input"]))]
+        rows = [{"index": i, "embedding": self.vectors.get(text, self.vector)}
+                for i, text in enumerate(body["input"])]
+        for row in rows:
+            if self.index_mode == "duplicate":
+                row["index"] = 0
+            elif self.index_mode == "out_of_range":
+                row["index"] = len(rows)
         rows.reverse()
         payload = json.dumps({"data": rows}).encode()
         self.send_response(200)
@@ -36,6 +44,8 @@ class Handler(BaseHTTPRequestHandler):
 def endpoint():
     Handler.requests = []
     Handler.vector = [3, 4]
+    Handler.index_mode = "normal"
+    Handler.vectors = {}
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -76,6 +86,30 @@ def test_remote_rejects_overlimit_and_bad_vectors(endpoint):
         embedder.encode_query("a")
 
 
+def test_remote_duplicate_batch_indices_retry_individually(endpoint):
+    Handler.index_mode = "duplicate"
+    Handler.vectors = {f"P:{i}": [i + 1, 1] for i in range(17)}
+    embedder = RemoteEmbedder({"provider": "api", "endpoint": endpoint, "model_id": "test",
+                               "prefixes": {"passage": "P:"}}, "secret")
+    result = embedder.encode_passages([str(i) for i in range(17)])
+    expected = np.array([[i + 1, 1] for i in range(17)], dtype=np.float32)
+    expected /= np.linalg.norm(expected, axis=1, keepdims=True)
+    np.testing.assert_allclose(result, expected, rtol=1e-6)
+    assert [len(body["input"]) for body, _ in Handler.requests] == [1, 16] + [1] * 17
+    Handler.requests.clear()
+    embedder.encode_passages(["0", "1"])
+    assert [body["input"] for body, _ in Handler.requests] == [["P:0"], ["P:1"]]
+
+
+def test_remote_invalid_single_index_still_fails(endpoint):
+    Handler.index_mode = "out_of_range"
+    embedder = RemoteEmbedder({"provider": "api", "endpoint": endpoint,
+                               "model_id": "test", "dimension": 2}, "secret")
+    with pytest.raises(RuntimeError, match="index"):
+        embedder.encode_passages(["a", "b"])
+    assert len(Handler.requests) <= 2
+
+
 def test_remote_cancel_stops_before_next_request(endpoint):
     embedder = RemoteEmbedder({"provider": "api", "endpoint": endpoint, "model_id": "test", "dimension": 2}, "key")
     cancel = threading.Event()
@@ -111,7 +145,8 @@ def test_credentials_never_persist_plaintext(tmp_path, monkeypatch):
     assert store.lookup(profile) == "override"
 
 
-def test_api_build_service_and_model_identity(endpoint, tmp_path, monkeypatch):
+@pytest.mark.parametrize("index_mode", ["normal", "duplicate"])
+def test_api_build_service_and_model_identity(endpoint, tmp_path, monkeypatch, index_mode):
     from ragstudio.providers import load_provider
     from ragstudio.project import ProjectStore, atomic_json
     from ragstudio.pipeline import build_project, active_index
@@ -121,6 +156,7 @@ def test_api_build_service_and_model_identity(endpoint, tmp_path, monkeypatch):
     from ragstudio.export import export_project
     import zipfile
 
+    Handler.index_mode = index_mode
     store = ProjectStore(tmp_path / "home")
     project = store.create_project("API 客户")
     source = tmp_path / "contract.txt"

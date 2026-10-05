@@ -228,6 +228,7 @@ class MainWindow(QMainWindow):
         export_row.addWidget(export_label)
         self.export_mode = QComboBox()
         self.export_mode.addItem("Windows 完整版", "windows-full")
+        self.export_mode.setToolTip("Windows 包自动匹配当前索引：API 使用轻量环境，本地模型附带推理环境及模型。开发者包需要自行安装 Python 和依赖。")
         self.export_mode.addItem("开发者包", "developer")
         self.export_mode.setAccessibleName("导出类型")
         export_row.addWidget(self.export_mode)

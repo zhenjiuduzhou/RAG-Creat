@@ -33,6 +33,11 @@ class DifyRequest(BaseModel):
 def create_app(bundle: Path, token: str | None = None) -> FastAPI:
     bundle = Path(bundle)
     manifest = load_json(bundle / "data" / "manifest.json")
+    runtime_profile = bundle / "runtime" / "runtime-profile.json"
+    if runtime_profile.is_file():
+        expected_kind = "api" if manifest.get("embedding_profile", {}).get("provider") == "api" else "local"
+        if load_json(runtime_profile).get("kind") != expected_kind:
+            raise ValueError("检索环境与知识库模型类型不匹配，请重新导出")
     embedder = (load_provider(manifest["embedding_profile"], bundle, allow_download=False, bundle_model=bundle / "model")
                 if manifest.get("embedding_profile") else Embedder.load(bundle / "model", allow_download=False))
     index = SearchIndex(bundle / "data", embedder)

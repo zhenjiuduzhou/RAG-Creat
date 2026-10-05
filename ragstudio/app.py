@@ -369,7 +369,9 @@ class StudioController(QObject):
 
         def work(progress):
             progress(0, "校验并打包")
-            return export_project(self.store, project_id, Path(destination), mode, self.model_dir, runtime, embedder=self._get_embedder(project_id))
+            api_runtime = base / "server-runtime-api" if getattr(sys, "frozen", False) else base / "dist" / "ragstudio-server-api"
+            return export_project(self.store, project_id, Path(destination), mode, self.model_dir, runtime,
+                                  embedder=self._get_embedder(project_id), api_server_runtime=api_runtime)
 
         def done(path):
             self.window.set_status(f"已导出：{path}")

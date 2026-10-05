@@ -34,6 +34,8 @@ python -m venv .venv  # 请使用 Python 3.12
 
 本地模型可离线使用；API 模式需要模型服务可访问。API 模式导出包不包含模型权重或 API Key，客户需配置环境变量 `RAG_STUDIO_EMBEDDING_KEY`。更换模型后必须重建。
 
+Windows 导出自动匹配构建索引时的模型类型：API 使用轻量服务环境；内置及自定义本地模型使用本地推理环境，并附带当前模型快照。两种检索环境都不包含文档解析或 OCR 组件。开发者包也按类型提供运行依赖。环境缺失或类型不符时会拒绝导出；旧桌面程序需要重新打包后才能使用此功能。
+
 ## 资料与限制
 
 - 支持 PDF、DOCX、PPTX、XLSX、CSV、TXT、MD、HTML、JSON、PNG、JPG 和 TIFF。旧版 `.doc`、`.xls` 请先转换。

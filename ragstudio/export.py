@@ -100,7 +100,8 @@ def _license_inventory() -> str:
 
 
 def export_project(store: ProjectStore, project_id: str, destination: Path, mode: str,
-                   model_dir: Path, server_runtime: Path | None = None, *, embedder=None) -> Path:
+                   model_dir: Path, server_runtime: Path | None = None, *, embedder=None,
+                   api_server_runtime: Path | None = None) -> Path:
     if mode not in ("windows-full", "developer"):
         raise ValueError("未知导出类型")
     root = store.root(project_id)
@@ -112,6 +113,15 @@ def export_project(store: ProjectStore, project_id: str, destination: Path, mode
         embedder = load_provider(project["embedding"], store.home, allow_download=False) if project.get("embedding") else Embedder.load(model_dir, allow_download=False)
     manifest = SearchIndex(source_index, embedder).manifest
     api_mode = manifest.get("embedding_profile", {}).get("provider") == "api"
+    runtime_kind = "api" if api_mode else "local"
+    if mode == "windows-full":
+        if api_mode:
+            server_runtime = api_server_runtime or (server_runtime.with_name("ragstudio-server-api") if server_runtime else None)
+        if not server_runtime or not (server_runtime / "ragstudio-server.exe").is_file():
+            raise FileNotFoundError(f"缺少 {runtime_kind} 检索环境；请重新运行 scripts/build_windows.ps1")
+        runtime_profile = server_runtime / "runtime-profile.json"
+        if not runtime_profile.is_file() or json.loads(runtime_profile.read_text(encoding="utf-8")).get("kind") != runtime_kind:
+            raise ValueError("检索环境类型不匹配；请重新运行 scripts/build_windows.ps1")
     if project.get("embedding", {}).get("provider") == "local":
         model_dir = Path(project["embedding"]["local_path"])
     if not manifest.get("embedding_profile") and model_fingerprint(model_dir) != manifest["model_fingerprint"]:
@@ -119,8 +129,6 @@ def export_project(store: ProjectStore, project_id: str, destination: Path, mode
     destination = Path(destination)
     destination.mkdir(parents=True, exist_ok=True)
     archive = destination / f"ragstudio-{project_id[:8]}-{mode}.zip"
-    if mode == "windows-full" and (not server_runtime or not (server_runtime / "ragstudio-server.exe").is_file()):
-        raise FileNotFoundError("Windows 检索服务尚未打包；请先运行 scripts/build_windows.ps1")
     temp_root = store.home / "temp"
     temp_root.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="ragstudio-export-", dir=temp_root) as temp:
@@ -152,10 +160,13 @@ def export_project(store: ProjectStore, project_id: str, destination: Path, mode
             package = bundle / "ragstudio"
             package.mkdir()
             source_root = asset_root / "developer-assets" / "ragstudio" if getattr(sys, "frozen", False) else Path(__file__).parent
-            for name in ("__init__.py", "embedding.py", "project.py", "search.py", "service.py", "serve.py", "providers.py", "credentials.py"):
+            for name in ("__init__.py", "embedding.py", "project.py", "search.py", "service.py", "serve.py", "providers.py", "credentials.py", "errors.py"):
                 shutil.copy2(source_root / name, package / name)
-            lockfile = asset_root / "developer-assets" / "requirements.lock" if getattr(sys, "frozen", False) else asset_root / "requirements.lock"
+            dependency_root = asset_root / "developer-assets" if getattr(sys, "frozen", False) else asset_root
+            lockfile = dependency_root / f"requirements-{runtime_kind}.txt"
             shutil.copy2(lockfile, bundle / "requirements.txt")
+            if not api_mode:
+                shutil.copy2(dependency_root / "requirements-api.txt", bundle / "requirements-api.txt")
         checksums = []
         for file in sorted(bundle.rglob("*")):
             if file.is_file():

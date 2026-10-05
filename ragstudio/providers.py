@@ -203,6 +203,7 @@ class RemoteEmbedder:
         self.model = SimpleNamespace(max_seq_length=self.max_length)
         self.tokenizer = self
         self.cancel = None
+        self._single_input_only = False
         self._opener = urllib.request.build_opener(_NoRedirect())
         declared = profile.get("dimension")
         if declared is None:
@@ -233,6 +234,8 @@ class RemoteEmbedder:
         self._check_cancel()
         if any(len(item) > self.max_length for item in inputs):
             raise ValueError("embedding input exceeds max_length")
+        if self._single_input_only and len(inputs) > 1:
+            return np.concatenate([self._request([text]) for text in inputs])
         payload = json.dumps({"model": self.model_id, "input": inputs}).encode("utf-8")
         headers = {"Content-Type": "application/json"}
         if self.key:
@@ -265,13 +268,18 @@ class RemoteEmbedder:
         rows = data.get("data") if isinstance(data, dict) else None
         if not isinstance(rows, list) or len(rows) != len(inputs):
             raise RuntimeError("embedding API returned incomplete data")
+        indices = [row.get("index") if isinstance(row, dict) else None for row in rows]
+        if (any(type(index) is not int for index in indices)
+                or sorted(indices) != list(range(len(inputs)))):
+            if len(inputs) > 1:
+                # Never infer ordering from an ambiguous batch response. Obtain
+                # each vector separately and retain this mode for this provider.
+                self._single_input_only = True
+                return self._request(inputs)
+            raise RuntimeError("模型 API 返回无效 index，无法确认文本与向量的对应关系")
         ordered = [None] * len(inputs)
         for row in rows:
-            if not isinstance(row, dict) or type(row.get("index")) is not int:
-                raise RuntimeError("embedding API returned invalid index")
             index = row["index"]
-            if index < 0 or index >= len(inputs) or ordered[index] is not None:
-                raise RuntimeError("embedding API returned duplicate or invalid index")
             values = row.get("embedding")
             if not isinstance(values, list) or not 1 <= len(values) <= 65536:
                 raise RuntimeError("embedding API returned invalid dimension")
@@ -303,7 +311,7 @@ class RemoteEmbedder:
 
     def _check_cancel(self) -> None:
         if self.cancel is not None and self.cancel.is_set():
-            from .pipeline import BuildCancelled
+            from .errors import BuildCancelled
             raise BuildCancelled("构建已取消")
 
 

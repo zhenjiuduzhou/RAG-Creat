@@ -17,15 +17,12 @@ from .embedding import MODEL_ID, PASSAGE_PREFIX, QUERY_PREFIX, model_fingerprint
 from .extract import ExtractionError, Section, extract_file
 from .project import ProjectStore, atomic_json, load_json, sha256_file
 from .search import verify_index
+from .errors import BuildCancelled
 
 EXTRACT_VERSION = 2
 CHUNK_VERSION = 1
 TARGET_TOKENS = 384
 OVERLAP_TOKENS = 48
-
-
-class BuildCancelled(Exception):
-    pass
 
 
 def active_index(root: Path) -> Path:
